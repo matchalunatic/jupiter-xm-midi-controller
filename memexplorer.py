@@ -4,11 +4,12 @@ from typing import Union, Optional
 import logging
 import anytree
 import yaml
-from jupiterlib import build_roland_rq1_message
+from jupiterlib import build_roland_rq1_message, get_sysex_data
 from midi_utils import build_rtmidi_inout
 from utils import lhex, nlhex, roland_address_arithmetic, roland_address_strider
 from padme import proxy
 from time import sleep
+from adafruit_midi.system_exclusive import SystemExclusive
 logging.basicConfig(level=logging.INFO)
 
 
@@ -294,20 +295,25 @@ class RolandMemoryExplorer:
 
 class MidiUtilities:
     @classmethod
-    def request_rq1_sysex(cls, val: MemoryValueNode, midiout, midiin):
+    def request_rq1_sysex(cls, val: MemoryValueNode, midiout, midiin, force_len=None):
         rq1_addr, rq1_val = val.get_rq1_bytes()
-        mesg = build_roland_rq1_message(rq1_addr, int.from_bytes(rq1_val, 'big'))
+        rq1_len = int.from_bytes(rq1_val, 'big')
+        if force_len:
+            rq1_len = force_len
+        mesg = build_roland_rq1_message(rq1_addr, rq1_len)
         m_out = bytes(mesg)
-        midi_str = ' '.join([hex(b) for b in m_out])
-        logger.debug("MIDI Sysex out = %s", midi_str)
         midiout.send_message(m_out)
         sleep(0.1)
-        m = midiin.get_message()
-        midi_str = ' '.join([hex(b) for b in m_out])
-        print(midi_str)
-        return m
+        answer, _ = midiin.get_message()
+        addr, val = get_sysex_data(SystemExclusive.from_bytes(answer))
+        return addr, val
 
-
+    @classmethod
+    def read_string_rq1_sysex(cls, val: MemoryValueNode, strlen, midiout, midiin):
+        _, val = cls.request_rq1_sysex(val, midiout, midiin, strlen)
+        val_bytes = val.to_bytes(strlen, 'big')
+        s = ''.join(chr(s) for s in val_bytes if 32 <= s <= 127)
+        return s
 
 def test_memex():
     memex = RolandMemoryExplorer('Jupiter-XM', 'jupx.yaml')
