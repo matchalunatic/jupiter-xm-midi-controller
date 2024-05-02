@@ -315,10 +315,6 @@ class MidiUtilities:
         s = ''.join(chr(s) for s in val_bytes if 32 <= s <= 127)
         return s
 
-def test_memex():
-    memex = RolandMemoryExplorer('Jupiter-XM', 'jupx.yaml')
-    scene_0 = memex
-
 if __name__ == '__main__':
     import code
     import readline
