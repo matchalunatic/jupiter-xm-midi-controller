@@ -72,6 +72,7 @@ def handle_midi(message: adafruit_midi.MIDIMessage = None):
             for client in MidiState.rq1_handlers.get(addr, []):
                 client.read_rq1(message)
 
+
 # setup_usb_midi()
 setup_midi_listeners()
 mr = MidiState.midi_receivers

@@ -7,5 +7,6 @@ class MidiConfig:
     LOG_DEFAULT = True
     MIDI_DEBUG = True
 
+
 class MidiCCMap:
     pass

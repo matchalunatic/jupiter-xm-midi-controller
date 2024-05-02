@@ -5,10 +5,12 @@ from constants import (
     DT1_CODE,
     RQ1_CODE,
     ROLAND_MANUFACTURER_CODE,
+    SYNTH_ID,
 )
 from adafruit_midi.system_exclusive import SystemExclusive
 from midistate import MidiState
 from time import monotonic
+from utils import lhex, bhex, roland_checksum
 
 
 def integer_to_roland_number(val: int, data_len=4):
@@ -34,16 +36,14 @@ def roland_number_to_integer(number: tuple):
     return total
 
 
-def get_roland_checksum(address_bytes: tuple, data_bytes: tuple) -> int:
-    return 128 - ((sum(a for a in address_bytes) + sum(a for a in data_bytes)) % 128)
-
 
 def build_roland_dt1_message(
     address_bytes: tuple, data_bytes: tuple
 ) -> SystemExclusive:
     """build a roland sysex message based on the address bytes and data bytes, computing the checksum"""
-    checksum = get_roland_checksum(address_bytes=address_bytes, data_bytes=data_bytes)
+    checksum = roland_checksum(address_bytes=address_bytes, data_bytes=data_bytes)
     ba = bytearray()
+    ba.append(SYNTH_ID)
     ba.extend(JUPITER_XM_DEVICE_ID)
     ba.append(DT1_CODE)
     ba.extend(address_bytes)
@@ -54,8 +54,9 @@ def build_roland_dt1_message(
 
 def build_roland_rq1_message(address_bytes, data_size):
     data_bytes = integer_to_roland_number(data_size, 4)
-    checksum = get_roland_checksum(address_bytes=address_bytes, data_bytes=data_bytes)
+    checksum = roland_checksum(address_bytes=address_bytes, data_bytes=data_bytes)
     ba = bytearray()
+    ba.append(SYNTH_ID)
     ba.extend(JUPITER_XM_DEVICE_ID)
     ba.append(RQ1_CODE)
     ba.extend(address_bytes)
@@ -63,6 +64,7 @@ def build_roland_rq1_message(address_bytes, data_size):
     ba.append(checksum)
     res = SystemExclusive(ROLAND_MANUFACTURER_CODE, ba)
     return res
+
 
 
 def validate_rq1_and_get_value(rq1: SystemExclusive):
@@ -77,10 +79,11 @@ def validate_rq1_and_get_value(rq1: SystemExclusive):
             ROLAND_MANUFACTURER_CODE,
         )
         return None
-    if tuple(rq1.data[0:5]) not in (JUPITER_XM_DEVICE_ID, JUPITER_X_DEVICE_ID):
+    if tuple(rq1.data[1:5]) not in (JUPITER_XM_DEVICE_ID, JUPITER_X_DEVICE_ID) and rq1.data[0] != SYNTH_ID:
         print(
             "Not for the right device",
-            tuple(rq1.data[0:4]),
+            rq1.data[0],
+            tuple(rq1.data[1:5]),
             JUPITER_X_DEVICE_ID,
             JUPITER_XM_DEVICE_ID,
         )
@@ -89,7 +92,7 @@ def validate_rq1_and_get_value(rq1: SystemExclusive):
     data_bytes = tuple(rq1.data[10:-1])
     checksum = rq1.data[-1]
 
-    our_checksum = get_roland_checksum(address_bytes, data_bytes)
+    our_checksum = roland_checksum(address_bytes, data_bytes)
     if checksum != our_checksum:
         print("Bad checksum", checksum, "!=", our_checksum)
         return None
@@ -119,7 +122,21 @@ def build_parameter_address(
         a + b + c for (a, b, c) in zip(scope_address, subsection, parameter_offset)
     )
 
-
+def get_sysex_data(s: SystemExclusive):
+    # use to interpret a DT1 message received
+    mfi = s.manufacturer_id
+    assert tuple(mfi) == ROLAND_MANUFACTURER_CODE
+    d = s.data
+    devcode, dev_id, cmd, address, value, checksum = d[0], d[1:5], d[5], d[6:10], d[10:-1], d[-1]
+    assert devcode == SYNTH_ID
+    converted_devid = tuple(i for i in dev_id)
+    assert converted_devid in (JUPITER_X_DEVICE_ID, JUPITER_XM_DEVICE_ID)
+    assert cmd in (0x11, 0x12)
+    verified_checksum = roland_checksum(address, value, 0)
+    assert verified_checksum == checksum
+    addr = int.from_bytes(address, "big")
+    val = int.from_bytes(value, "big")
+    return addr, val
 class RelativeParameter:
     """A relative MIDI parameter"""
 
@@ -142,7 +159,6 @@ class RelativeParameter:
         self.value = 0
         self._monotonic = 0
         self.multiplicator = multiplicator
-        print("Target address is", [hex(a) for a in target_address])
         self._get_value_from_hardware()
         h = MidiState.parameter_handlers.get((self.cc_code, self.midi_channel), [])
         h.append(self)
@@ -178,7 +194,7 @@ class RelativeParameter:
     def change(self, val):
         """apply relative midi CC to this parameter"""
         step = val - 64
-        self.value += step *  self.multiplicator
+        self.value += step * self.multiplicator
         self.value = max(self.range[0], min(self.value, self.range[1]))
         if not self.changed:
             self.changed = True
