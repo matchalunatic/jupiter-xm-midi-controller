@@ -1,6 +1,7 @@
 import rtmidi
 import rtmidi.midiutil
 
+
 def build_rtmidi_inout() -> tuple[rtmidi.MidiIn, rtmidi.MidiOut]:
     available_in = rtmidi.MidiIn().get_ports()
     available_out = rtmidi.MidiOut().get_ports()

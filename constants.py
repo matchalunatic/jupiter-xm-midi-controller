@@ -4,7 +4,7 @@ MIDI_TIMEOUT = 0.001
 DEBOUNCE_MIDI_SECONDS = 0.050
 
 ROLAND_MANUFACTURER_CODE = (0x41,)
-SYNTH_ID = 0x10 # you may need to change that in your setup
+SYNTH_ID = 0x10  # you may need to change that in your setup
 JUPITER_X_DEVICE_ID = (0x00, 0x00, 0x00, 0x52)
 JUPITER_XM_DEVICE_ID = (0x00, 0x00, 0x00, 0x65)
 DT1_CODE = 0x12

@@ -10,7 +10,7 @@ from constants import (
 from adafruit_midi.system_exclusive import SystemExclusive
 from midistate import MidiState
 from time import monotonic
-from utils import lhex, bhex, roland_checksum
+from utils import roland_checksum
 
 
 def integer_to_roland_number(val: int, data_len=4):
@@ -34,7 +34,6 @@ def roland_number_to_integer(number: tuple):
         total += elem * 16**numlen
         numlen -= 1
     return total
-
 
 
 def build_roland_dt1_message(
@@ -66,7 +65,6 @@ def build_roland_rq1_message(address_bytes, data_size):
     return res
 
 
-
 def validate_rq1_and_get_value(rq1: SystemExclusive):
     if (
         rq1.manufacturer_id != ROLAND_MANUFACTURER_CODE
@@ -79,7 +77,10 @@ def validate_rq1_and_get_value(rq1: SystemExclusive):
             ROLAND_MANUFACTURER_CODE,
         )
         return None
-    if tuple(rq1.data[1:5]) not in (JUPITER_XM_DEVICE_ID, JUPITER_X_DEVICE_ID) and rq1.data[0] != SYNTH_ID:
+    if (
+        tuple(rq1.data[1:5]) not in (JUPITER_XM_DEVICE_ID, JUPITER_X_DEVICE_ID)
+        and rq1.data[0] != SYNTH_ID
+    ):
         print(
             "Not for the right device",
             rq1.data[0],
@@ -122,12 +123,20 @@ def build_parameter_address(
         a + b + c for (a, b, c) in zip(scope_address, subsection, parameter_offset)
     )
 
+
 def get_sysex_data(s: SystemExclusive):
     # use to interpret a DT1 message received
     mfi = s.manufacturer_id
     assert tuple(mfi) == ROLAND_MANUFACTURER_CODE
     d = s.data
-    devcode, dev_id, cmd, address, value, checksum = d[0], d[1:5], d[5], d[6:10], d[10:-1], d[-1]
+    devcode, dev_id, cmd, address, value, checksum = (
+        d[0],
+        d[1:5],
+        d[5],
+        d[6:10],
+        d[10:-1],
+        d[-1],
+    )
     assert devcode == SYNTH_ID
     converted_devid = tuple(i for i in dev_id)
     assert converted_devid in (JUPITER_X_DEVICE_ID, JUPITER_XM_DEVICE_ID)
@@ -137,6 +146,8 @@ def get_sysex_data(s: SystemExclusive):
     addr = int.from_bytes(address, "big")
     val = int.from_bytes(value, "big")
     return addr, val
+
+
 class RelativeParameter:
     """A relative MIDI parameter"""
 

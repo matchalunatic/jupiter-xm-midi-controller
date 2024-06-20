@@ -8,12 +8,7 @@ import usb_midi
 import busio
 import board
 from time import sleep
-from adafruit_midi.control_change import ControlChange
-from adafruit_midi.system_exclusive import SystemExclusive
 from constants import (
-    ROLAND_MANUFACTURER_CODE,
-    JUPITER_XM_DEVICE_ID,
-    DT1_CODE,
     MIDI_BAUD_RATE,
     MIDI_TIMEOUT,
     TONE_PARTIAL_CUTOFF_FREQ,
