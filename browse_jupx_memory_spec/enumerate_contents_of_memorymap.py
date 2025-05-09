@@ -299,7 +299,7 @@ class TopLevelMetaStructureInstance:
         base_offset = self.total_offset
         for el in self.meta_structure.structure_refs:
             # delegate to the structure ref the role
-            for i in el.relative_memory_view(base_offset):
+            for i in el.relative_memory_view(base_offset, self):
                 yield i
 
     @property
@@ -353,7 +353,7 @@ class TopLevelMetaStructureStructureRef:
     def kind(self):
         raise NotImplementedError
 
-    def relative_memory_view(self, external_offset: OffsetAddr = OffsetAddr(0)) -> Generator[MemoryAddressView]:
+    def relative_memory_view(self, external_offset: OffsetAddr, initiator: TopLevelMetaStructureInstance) -> Generator[MemoryAddressView]:
         raise NotImplementedError
 
 
@@ -370,10 +370,11 @@ class NonStridingTopLevelMetaStructureStructureRef(TopLevelMetaStructureStructur
     def kind(self):
         return ZoneKind.KIND_NON_STRIDING
 
-    def relative_memory_view(self, external_offset: OffsetAddr = OffsetAddr(0)) -> Generator[MemoryAddressView]:
+    def relative_memory_view(self, external_offset: OffsetAddr, initiator: TopLevelMetaStructureInstance) -> Generator[MemoryAddressView]:
         base_offset = self.offset
         for atom in self.structure_type.atoms:
-            yield MemoryAddressView(OffsetAddr(base_offset + external_offset + atom.first_offset_start), atom.name, self.structure_type, atom, 'not implemented')
+            summary_str = f"{initiator.meta_structure.name}[{initiator.index}].{self.name}[1(unique)].{atom.name}"
+            yield MemoryAddressView(OffsetAddr(base_offset + external_offset + atom.first_offset_start), summary_str, self.structure_type, atom, 'not implemented')
 
 
 @dataclass
@@ -392,10 +393,11 @@ class StridingTopLevelMetaStructureStructureRef(TopLevelMetaStructureStructureRe
     def kind(self):
         return ZoneKind.KIND_STRIDING
 
-    def relative_memory_view(self, external_offset: OffsetAddr = OffsetAddr(0)) -> Generator[MemoryAddressView]:
+    def relative_memory_view(self, external_offset: OffsetAddr, initiator: TopLevelMetaStructureInstance) -> Generator[MemoryAddressView]:
         for index, instance_offset in enumerate(range(self.first_offset, self.last_offset + 1, self.stride)):
             for atom in self.structure_type.atoms:
-                yield MemoryAddressView(OffsetAddr(external_offset + instance_offset + atom.first_offset_start), atom.name, self.structure_type, atom, 'not implemented')
+                summary_str = f"{initiator.meta_structure.name}[{initiator.index}].{self.name}[{index + 1}].{atom.name}"
+                yield MemoryAddressView(OffsetAddr(external_offset + instance_offset + atom.first_offset_start), summary_str, self.structure_type, atom, 'not implemented')
 
     def __str__(self):
         return f"StridingTopLevelMetaStructureStructureRefs:{self.name} [{self.first_offset}..{self.last_offset}/{self.stride}] ({self.item_count} items)"
@@ -606,11 +608,11 @@ def parse_top_level_meta_structures(memlayout_entries):
 
 
 def instantiate_memory(memory_layout: MemoryLayout):
-    print("offset,structure,atom in structure,summary")
+    print("offset,summary")
     for i in memory_layout.contents:
         for zone in i.contents:
             for report_item in zone.contents.memory_view:
-                print(f"{report_item.offset},{report_item.structure_type.name},{report_item.structure_atom.name},{report_item.summary}")
+                print(f"{report_item.offset},{report_item.summary}")
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
