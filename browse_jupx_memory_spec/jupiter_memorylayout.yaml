@@ -1,0 +1,249 @@
+memory_layout:
+    - name: System
+      first_offset_start: 0x0
+      last_offset_start: 0x0
+      top_level_type: System
+    - name: Setup
+      first_offset_start: 0x100000
+      last_offset_start: 0x100000
+      top_level_type: Setup
+    - name: Temporary Scene
+      first_offset_start: 0x1000000
+      last_offset_start: 0x1000000
+      top_level_type: Scene
+    - name: Temporary Tone ZCore
+      first_offset_start: 0x2000000
+      last_offset_start: 0x2030000
+      top_level_type: ZCore
+      stride: 0x10000
+    - name: Temporary Tone Analog Synth Model
+      first_offset_start: 0x2100000
+      last_offset_start: 0x2130000
+      top_level_type: SynMdl
+      stride: 0x10000
+    - name: Temporary Tone RD Piano
+      first_offset_start: 0x2200000
+      last_offset_start: 0x2200000
+      top_level_type: RDTONE
+    - name: Temporary Tone JUPITER-X
+      first_offset_start: 0x2500000
+      last_offset_start: 0x2530000
+      top_level_type: MdlJPX
+      stride: 0x10000
+    - name: User Scene
+      first_offset_start: 0x40000000
+      last_offset_start: 0x497b0000
+      top_level_type: Scene
+      stride: 0x50000
+    - name: User Tone
+      first_offset_start: 0x50000000
+      last_offset_start: 0x577e0000
+      top_level_type: UserTone
+      stride: 0x20000
+    - name: User Scene (257)
+      first_offset_start: 0x60000000
+      last_offset_start: 0x697b0000
+      top_level_type: Scene
+      stride: 0x50000
+    #- name: Editor # disabled because it has no type
+    #  first_offset_start: 0x7f000000
+    #  last_offset_start: 0x7f000000
+    #  top_level_type: null
+
+top_level_meta_structures:
+    Setup: # has to be added manually because it's the one inconsistency in the model
+        - name: Setup settings
+          first_offset_start: 0x0
+          last_offset_start: 0x0
+          structure_type: Setup
+    System:
+        - name: System Common
+          first_offset_start: 0x0
+          last_offset_start: 0x0
+          structure_type: System Common
+        - name: System Control
+          first_offset_start: 0x100
+          last_offset_start: 0x100
+          structure_type: System Control
+        - name: System Chorus
+          first_offset_start: 0x200
+          last_offset_start: 0x200
+          structure_type: Chorus
+        - name: System Delay
+          first_offset_start: 0x300
+          last_offset_start: 0x300
+          structure_type: Chorus
+        - name: System Reverb
+          first_offset_start: 0x400
+          last_offset_start: 0x400
+          structure_type: Reverb
+        - name: Master EQ
+          first_offset_start: 0x500
+          last_offset_start: 0x500
+          structure_type: Master EQ
+        - name: Master Comp
+          first_offset_start: 0x600
+          last_offset_start: 0x600
+          structure_type: Master Comp
+        - name: Model Bank Assign
+          first_offset_start: 0x700
+          last_offset_start: 0x1600
+          structure_type: Model Bank Assign
+          stride: 0x100
+        - name: Button Color Set
+          first_offset_start: 0x1700
+          last_offset_start: 0x2000
+          structure_type: Button Color Set
+          stride: 0x100
+    SynMdl:
+        - name: Analog Synth Model Parameter
+          first_offset_start: 0x0
+          last_offset_start: 0x0
+          structure_type: MDLSYN0
+        - name: Analog Synth Model MFX
+          first_offset_start: 0x200
+          last_offset_start: 0x200
+          structure_type: MFX
+        - name: Analog Synth Model Tone Com
+          first_offset_start: 0x400
+          last_offset_start: 0x400
+          structure_type: ToneCom
+    RDTONE:
+        - name: RD Tone Name
+          first_offset_start: 0x0
+          last_offset_start: 0x0
+          structure_type: ToneName
+        - name: RD Piano Sympathetic Resonance
+          first_offset_start: 0x100
+          last_offset_start: 0x100
+          structure_type: Sympathetic Resonance
+    MdlJPX:
+        - name: Model JUPITER-X Parameter
+          first_offset_start: 0x0
+          last_offset_start: 0x0
+          structure_type: MDLJPX
+        - name: Model JUPITER-X MFX
+          first_offset_start: 0x300
+          last_offset_start: 0x300
+          structure_type: MFX
+        - name: Model JUPITER-X Tone Com
+          first_offset_start: 0x500
+          last_offset_start: 0x500
+          structure_type: ToneCom
+    Scene:
+        - name: Scene Common
+          first_offset_start: 0x0
+          last_offset_start: 0x0
+          structure_type: Scene Common
+        - name: Scene Part
+          first_offset_start: 0x1000
+          last_offset_start: 0x1400
+          structure_type: Scene Part
+          stride: 0x100
+        - name: Scene EQ
+          first_offset_start: 0x2000
+          last_offset_start: 0x2400
+          structure_type: Scene EQ
+          stride: 0x100
+        - name: Scene MFX
+          first_offset_start: 0x3000
+          last_offset_start: 0x3800
+          structure_type: MFX
+          stride: 0x200
+        - name: Scene Zone
+          first_offset_start: 0x4000
+          last_offset_start: 0x4400
+          structure_type: Scene Zone
+          stride: 0x100
+        - name: Scene Chorus
+          first_offset_start: 0x5000
+          last_offset_start: 0x5000
+          structure_type: Chorus
+        - name: Scene Delay
+          first_offset_start: 0x5100
+          last_offset_start: 0x5100
+          structure_type: Chorus
+        - name: Scene Reverb
+          first_offset_start: 0x5200
+          last_offset_start: 0x5200
+          structure_type: Reverb
+        - name: Scene Drive
+          first_offset_start: 0x5300
+          last_offset_start: 0x5300
+          structure_type: Drive
+        - name: Scene Arpeggio Common
+          first_offset_start: 0x5400
+          last_offset_start: 0x5400
+          structure_type: Arpeggio Common
+        - name: Scene Arpeggio Part
+          first_offset_start: 0x5500
+          last_offset_start: 0x5900
+          structure_type: Arpeggio Part
+          stride: 0x100
+        - name: Scene Arpeggio User Pattern
+          first_offset_start: 0x5a00
+          last_offset_start: 0x15a00
+          structure_type: User Pattern
+          stride: 0x2000
+    ZCore:
+        - name: Tone Common
+          first_offset_start: 0x0
+          last_offset_start: 0x0
+          structure_type: Tone Common
+        - name: Tone MFX
+          first_offset_start: 0x100
+          last_offset_start: 0x100
+          structure_type: MFX
+        - name: Tone PMT
+          first_offset_start: 0x1000
+          last_offset_start: 0x1000
+          structure_type: Tone PMT
+        - name: Tone Partial
+          first_offset_start: 0x2000
+          last_offset_start: 0x2300
+          structure_type: Tone Partial
+          stride: 0x100
+        - name: Partial Pitch Env
+          first_offset_start: 0x2400
+          last_offset_start: 0x2700
+          structure_type: Partial Pitch Env
+          stride: 0x100
+        - name: Partial Filter Env
+          first_offset_start: 0x2800
+          last_offset_start: 0x2b00
+          structure_type: Partial Filter Env
+          stride: 0x100
+        - name: Partial Amp Env
+          first_offset_start: 0x2c00
+          last_offset_start: 0x2f00
+          structure_type: Partial Amp Env
+          stride: 0x100
+        - name: Partial LFO
+          first_offset_start: 0x3000
+          last_offset_start: 0x3600
+          structure_type: Partial LFO
+          stride: 0x200
+        - name: Partial EQ
+          first_offset_start: 0x3800
+          last_offset_start: 0x3b00
+          structure_type: Partial EQ
+          stride: 0x100
+        - name: Synth Common
+          first_offset_start: 0x3c00
+          last_offset_start: 0x3c00
+          structure_type: Tone Synth Common
+        - name: Synth PMT
+          first_offset_start: 0x3d00
+          last_offset_start: 0x3d00
+          structure_type: Tone Synth PMT
+        - name: Synth Partial
+          first_offset_start: 0x3e00
+          last_offset_start: 0x4100
+          structure_type: Tone Synth Partial
+          stride: 0x100
+    UserTone:
+        - name: data
+          first_offset_start: 0x0
+          last_offset_start: 0x1e00
+          structure_type: USRDATABLK
+          stride: 0x200

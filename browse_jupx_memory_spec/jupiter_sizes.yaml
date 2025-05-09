@@ -1,0 +1,36 @@
+size_entries:
+    Setup: 0x3
+    System Common: 0x30
+    System Control: 0x20
+    Button Color Set: 0x2d
+    Drive: 0x5
+    Scene Common: 0x2e
+    Scene Part: 0x50
+    Scene EQ: 0x9
+    Scene Zone: 0x1c
+    Arpeggio Common: 0x12
+    Arpeggio Part: 0x3d
+    User Pattern: 0x1040
+    Master Comp: 0x15
+    Master EQ: 0xf
+    Sympathetic Resonance: 0x4
+    ToneName: 0x10
+    ToneCom: 0x17
+    Model Bank Assign: 0x31
+    USRDATABLK: 0x200
+    Partial EQ: 0x1b
+    Partial LFO: 0x11e
+    Partial Pitch Env: 0x2d
+    Partial Filter Env: 0x2c
+    Partial Amp Env: 0x20
+    Tone Common: 0x36
+    Tone PMT: 0x26
+    Tone Partial: 0x100
+    Tone Synth Common: 0x9
+    Tone Synth PMT: 0x17
+    Tone Synth Partial: 0x1e
+    MDLSYN0: 0x127
+    MDLJPX: 0x20d
+    MFX: 0x110
+    Reverb: 0x53
+    Chorus: 0x54
