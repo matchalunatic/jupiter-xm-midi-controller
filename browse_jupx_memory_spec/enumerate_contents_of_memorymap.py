@@ -6,6 +6,7 @@ It will generate a huge file reasonably fast. You may peruse it.
 
 In the future, I will make it more easily searchable.
 """
+
 from __future__ import annotations
 from typing import Any, Dict, Generator, List, Optional, Tuple
 import logging
@@ -17,7 +18,7 @@ import math
 
 logger = logging.getLogger(__name__)
 
-INTERESTING_MEMORY_END = 0x7F000000
+ADDRESSABLE_MEMORY_SIZE = 0x80_00_00_00
 
 
 
@@ -51,6 +52,8 @@ class OffsetAddr(Offset):
         b = mask.format(self)
         return " ".join(b[r : r + 2] for r in range(0, len(b), 2))
 
+EXCLUDE_MEMORY_RANGES = ((OffsetAddr(0x40000000), OffsetAddr(0x7fffffff)),
+                         (OffsetAddr(0x40000000), OffsetAddr(0x7fffffff)),)
 
 class OffsetStride(Offset):
     pass
@@ -66,7 +69,9 @@ class StructureTypeUniqueSymbol(str):
         s = str.__new__(cls, value)
         s.for_structure = for_structure
         cls._instances[value] = s
-        logger.debug("StructureTypeUniqueSymbol: Creating new instance %s (id: %s)", s, id(s))
+        logger.debug(
+            "StructureTypeUniqueSymbol: Creating new instance %s (id: %s)", s, id(s)
+        )
         return s
 
     @property
@@ -115,12 +120,20 @@ class TopLevelMetaStructureUniqueSymbol(str):
 
     def __new__(cls, value, for_metastructure=None):
         if value in cls._instances:
-            logger.debug("TopLevelMetaStructureUniqueSymbol[%s]: singleton = %s", value, cls._instances[value])
+            logger.debug(
+                "TopLevelMetaStructureUniqueSymbol[%s]: singleton = %s",
+                value,
+                cls._instances[value],
+            )
             return cls._instances[value]
         s = str.__new__(cls, value)
         s.for_metastructure = for_metastructure
         cls._instances[value] = s
-        logger.debug("TopLevelMetaStructureUniqueSymbol: Creating new instance %s (id: %s)", s, id(s))
+        logger.debug(
+            "TopLevelMetaStructureUniqueSymbol: Creating new instance %s (id: %s)",
+            s,
+            id(s),
+        )
         return s
 
     @property
@@ -138,18 +151,23 @@ class TopLevelMetaStructureUniqueSymbol(str):
     ) -> TopLevelMetaStructureType:
         return cls._instances[name].metastructure
 
+
 @dataclass
 class MemoryAddressView:
     offset: OffsetAddr
+    define_name: str
+    length: int
     summary: str
     structure_type: StructureType
     structure_atom: StructureAtom
     value: Any
 
+
 @dataclass
 class MemoryLayout:
-    contents: List[MemoryZoneType]
-    
+    contents: List[TopLevelMemoryZoneContainer]
+
+
 @dataclass
 class TopLevelMemoryZone:
     """This represents an actual memory zone with a physical offset in memory.
@@ -208,6 +226,10 @@ class TopLevelMemoryZoneContainer:
     @property
     def item_count(self) -> int:
         raise NotImplementedError
+    
+    @property
+    def contents(self) -> List[TopLevelMemoryZone]:
+        raise NotImplementedError
 
 
 @dataclass
@@ -218,8 +240,7 @@ class StridingTopLevelMemoryZoneContainer(TopLevelMemoryZoneContainer):
 
     @property
     def item_count(self):
-        if self.stride is None or self.first_offset == self.last_offset:
-            return 1
+        assert self.first_offset < self.last_offset
         return (self.stride + self.last_offset - self.first_offset) // self.stride
 
     @property
@@ -265,7 +286,9 @@ class TopLevelMetaStructureType:
     structure_refs: List[TopLevelMetaStructureStructureRef]
 
     def __post_init__(self):
-        logger.debug(f"Setting metastructure reference for {self.name} [id: {id(self.name)}]")
+        logger.debug(
+            f"Setting metastructure reference for {self.name} [id: {id(self.name)}]"
+        )
         self.name.metastructure = self
 
     def __str__(self):
@@ -282,6 +305,15 @@ class TopLevelMetaStructureInstance:
     memory_zone: TopLevelMemoryZone
 
     @property
+    def define_basename(self) -> str:
+        """Generate a C #define basename for all atoms in this metastructure"""
+        if self.memory_zone.container.item_count > 1:
+            # multiple items
+            return f"{self.memory_zone.container.name}_{self.index}"
+        else:
+            return f"{self.memory_zone.container.name}"
+
+    @property
     def offset(self) -> OffsetAddr:
         return self.memory_zone.offset
 
@@ -291,12 +323,15 @@ class TopLevelMetaStructureInstance:
 
     @property
     def total_offset(self):
-        return OffsetAddr(self.memory_zone.offset + self.offset)
+        assert self.memory_zone.offset < ADDRESSABLE_MEMORY_SIZE
+        return OffsetAddr(self.offset)
 
     @property
     def memory_view(self) -> Generator[MemoryAddressView]:
         """generate a list of offsets with each parameter and exact address"""
         base_offset = self.total_offset
+        if any(a <= base_offset <= b for (a, b) in EXCLUDE_MEMORY_RANGES):
+             return
         for el in self.meta_structure.structure_refs:
             # delegate to the structure ref the role
             for i in el.relative_memory_view(base_offset, self):
@@ -325,6 +360,7 @@ class TopLevelMetaStructureInstance:
                     total_off = OffsetAddr(
                         self.total_offset + instance_offset + sms.first_offset
                     )
+                    assert total_off < ADDRESSABLE_MEMORY_SIZE
                     out[total_off] = (
                         memzone_name,
                         memzone_index,
@@ -334,6 +370,7 @@ class TopLevelMetaStructureInstance:
                     )
             elif nsms is not None:
                 total_off = OffsetAddr(self.total_offset + nsms.offset)
+                assert total_off < ADDRESSABLE_MEMORY_SIZE
                 out[total_off] = (
                     memzone_name,
                     memzone_index,
@@ -353,7 +390,9 @@ class TopLevelMetaStructureStructureRef:
     def kind(self):
         raise NotImplementedError
 
-    def relative_memory_view(self, external_offset: OffsetAddr, initiator: TopLevelMetaStructureInstance) -> Generator[MemoryAddressView]:
+    def relative_memory_view(
+        self, external_offset: OffsetAddr, initiator: TopLevelMetaStructureInstance
+    ) -> Generator[MemoryAddressView]:
         raise NotImplementedError
 
 
@@ -370,11 +409,26 @@ class NonStridingTopLevelMetaStructureStructureRef(TopLevelMetaStructureStructur
     def kind(self):
         return ZoneKind.KIND_NON_STRIDING
 
-    def relative_memory_view(self, external_offset: OffsetAddr, initiator: TopLevelMetaStructureInstance) -> Generator[MemoryAddressView]:
+    def relative_memory_view(
+        self, external_offset: OffsetAddr, initiator: TopLevelMetaStructureInstance
+    ) -> Generator[MemoryAddressView]:
         base_offset = self.offset
+        assert base_offset < ADDRESSABLE_MEMORY_SIZE
         for atom in self.structure_type.atoms:
             summary_str = f"{initiator.meta_structure.name}[{initiator.index}].{self.name}[1(unique)].{atom.name}"
-            yield MemoryAddressView(OffsetAddr(base_offset + external_offset + atom.first_offset_start), summary_str, self.structure_type, atom, 'not implemented')
+            define_name = f"{initiator.define_basename}_{self.name}_{atom.name}"
+            total_offset = OffsetAddr(base_offset + external_offset + atom.first_offset_start)
+            assert total_offset < ADDRESSABLE_MEMORY_SIZE
+
+            yield MemoryAddressView(
+                offset=total_offset,
+                define_name=define_name,
+                summary=summary_str,
+                length=atom.length,
+                structure_type=self.structure_type,
+                structure_atom=atom,
+                value="not implemented",
+            )
 
 
 @dataclass
@@ -393,11 +447,29 @@ class StridingTopLevelMetaStructureStructureRef(TopLevelMetaStructureStructureRe
     def kind(self):
         return ZoneKind.KIND_STRIDING
 
-    def relative_memory_view(self, external_offset: OffsetAddr, initiator: TopLevelMetaStructureInstance) -> Generator[MemoryAddressView]:
-        for index, instance_offset in enumerate(range(self.first_offset, self.last_offset + 1, self.stride)):
+    def relative_memory_view(
+        self, external_offset: OffsetAddr, initiator: TopLevelMetaStructureInstance
+    ) -> Generator[MemoryAddressView]:
+        for index, instance_offset in enumerate(
+            range(self.first_offset, self.last_offset + 1, self.stride)
+        ):
             for atom in self.structure_type.atoms:
                 summary_str = f"{initiator.meta_structure.name}[{initiator.index}].{self.name}[{index + 1}].{atom.name}"
-                yield MemoryAddressView(OffsetAddr(external_offset + instance_offset + atom.first_offset_start), summary_str, self.structure_type, atom, 'not implemented')
+
+                define_name = (
+                    f"{initiator.define_basename}_{self.name}_{index + 1}_{atom.name}"
+                )
+                yield MemoryAddressView(
+                    OffsetAddr(
+                        external_offset + instance_offset + atom.first_offset_start
+                    ),
+                    define_name=define_name,
+                    length=atom.length,
+                    summary=summary_str,
+                    structure_type=self.structure_type,
+                    structure_atom=atom,
+                    value="not implemented",
+                )
 
     def __str__(self):
         return f"StridingTopLevelMetaStructureStructureRefs:{self.name} [{self.first_offset}..{self.last_offset}/{self.stride}] ({self.item_count} items)"
@@ -608,11 +680,19 @@ def parse_top_level_meta_structures(memlayout_entries):
 
 
 def instantiate_memory(memory_layout: MemoryLayout):
-    print("offset,summary")
-    for i in memory_layout.contents:
-        for zone in i.contents:
-            for report_item in zone.contents.memory_view:
-                print(f"{report_item.offset},{report_item.summary}")
+    items_from_excluded_ranges = 0
+    with open('define_list.h', 'w', encoding='utf-8', newline='\n') as fh:
+        for i in memory_layout.contents:
+            for zone in i.contents:
+                for report_item in zone.contents.memory_view:
+                    if any(a <= report_item.offset <= b for (a,b) in EXCLUDE_MEMORY_RANGES):
+                        items_from_excluded_ranges += 1
+                        if items_from_excluded_ranges % 100_000 == 0:
+                            logger.info("Excluded items: %s", items_from_excluded_ranges)
+                        continue
+                    formatted_offset = '0x{0:08x}'.format(report_item.offset)
+                    fh.write(f'#define {report_item.define_name} {formatted_offset} // {report_item.summary}\n')
+    print(f"Excluded items: {items_from_excluded_ranges}")
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
