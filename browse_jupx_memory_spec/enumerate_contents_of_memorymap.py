@@ -15,12 +15,31 @@ from enum import IntEnum
 from dataclasses import dataclass
 import textwrap
 import math
+import re
 
 logger = logging.getLogger(__name__)
 
 ADDRESSABLE_MEMORY_SIZE = 0x80_00_00_00
 
 
+def normalize_define_name(name: str):
+    normalized = re.sub(r'_+', '_', re.sub(r'\W', '_', name)).strip('_')
+    normalized = '_' + normalized if not normalized or not normalized[0].isalpha() else normalized
+    return normalized.upper()
+
+def drop_repeating_consecutive_words(normalized_name: str):
+    spl = normalized_name.split('_')
+    previous_component = ''
+    o = []
+    for component in spl:
+        if component == previous_component:
+            continue
+        o.append(component)
+        previous_component = component
+    return '_'.join(o)
+
+assert normalize_define_name('') == '_'
+assert normalize_define_name('__foo') == 'FOO'
 
 class ZoneKind(IntEnum):
     KIND_NON_STRIDING = 0
@@ -52,8 +71,12 @@ class OffsetAddr(Offset):
         b = mask.format(self)
         return " ".join(b[r : r + 2] for r in range(0, len(b), 2))
 
-EXCLUDE_MEMORY_RANGES = ((OffsetAddr(0x40000000), OffsetAddr(0x7fffffff)),
-                         (OffsetAddr(0x40000000), OffsetAddr(0x7fffffff)),)
+
+EXCLUDE_MEMORY_RANGES = (
+    (OffsetAddr(0x40000000), OffsetAddr(0x7FFFFFFF)),
+    (OffsetAddr(0x40000000), OffsetAddr(0x7FFFFFFF)),
+)
+
 
 class OffsetStride(Offset):
     pass
@@ -155,13 +178,29 @@ class TopLevelMetaStructureUniqueSymbol(str):
 @dataclass
 class MemoryAddressView:
     offset: OffsetAddr
+    index: int
     define_name: str
     length: int
     summary: str
     structure_type: StructureType
     structure_atom: StructureAtom
-    value: Any
+    value: Optional[Any] = None
+    initiator: Optional[TopLevelMetaStructureInstance] = None
 
+    @property
+    def size(self):
+        return max(1, self.structure_atom.last_offset_start - self.structure_atom.first_offset_start + 1)
+
+    @property
+    def normalized_define_name(self) -> str:
+        if self.initiator is None:
+            raise RuntimeError("Cannot produce normalized define name without initiator")
+        
+        is_one_instance_of_many = self.index > 0
+        if is_one_instance_of_many:
+            return drop_repeating_consecutive_words(normalize_define_name(f"{self.initiator.define_basename}_{self.structure_type.name}_{self.index}_{self.structure_atom.name}"))
+        else:
+            return drop_repeating_consecutive_words(normalize_define_name(f"{self.initiator.define_basename}_{self.structure_type.name}_{self.structure_atom.name}"))
 
 @dataclass
 class MemoryLayout:
@@ -226,11 +265,14 @@ class TopLevelMemoryZoneContainer:
     @property
     def item_count(self) -> int:
         raise NotImplementedError
-    
+
     @property
     def contents(self) -> List[TopLevelMemoryZone]:
         raise NotImplementedError
 
+    @property
+    def normalized_name(self):
+        return self.name.replace()
 
 @dataclass
 class StridingTopLevelMemoryZoneContainer(TopLevelMemoryZoneContainer):
@@ -331,7 +373,7 @@ class TopLevelMetaStructureInstance:
         """generate a list of offsets with each parameter and exact address"""
         base_offset = self.total_offset
         if any(a <= base_offset <= b for (a, b) in EXCLUDE_MEMORY_RANGES):
-             return
+            return
         for el in self.meta_structure.structure_refs:
             # delegate to the structure ref the role
             for i in el.relative_memory_view(base_offset, self):
@@ -417,17 +459,21 @@ class NonStridingTopLevelMetaStructureStructureRef(TopLevelMetaStructureStructur
         for atom in self.structure_type.atoms:
             summary_str = f"{initiator.meta_structure.name}[{initiator.index}].{self.name}[1(unique)].{atom.name}"
             define_name = f"{initiator.define_basename}_{self.name}_{atom.name}"
-            total_offset = OffsetAddr(base_offset + external_offset + atom.first_offset_start)
+            total_offset = OffsetAddr(
+                base_offset + external_offset + atom.first_offset_start
+            )
             assert total_offset < ADDRESSABLE_MEMORY_SIZE
 
             yield MemoryAddressView(
                 offset=total_offset,
+                index=0,
                 define_name=define_name,
                 summary=summary_str,
                 length=atom.length,
                 structure_type=self.structure_type,
                 structure_atom=atom,
                 value="not implemented",
+                initiator=initiator,
             )
 
 
@@ -463,12 +509,14 @@ class StridingTopLevelMetaStructureStructureRef(TopLevelMetaStructureStructureRe
                     OffsetAddr(
                         external_offset + instance_offset + atom.first_offset_start
                     ),
+                    index=index,
                     define_name=define_name,
                     length=atom.length,
                     summary=summary_str,
                     structure_type=self.structure_type,
                     structure_atom=atom,
                     value="not implemented",
+                    initiator=initiator
                 )
 
     def __str__(self):
@@ -528,9 +576,9 @@ class StructureAtom:
     bitmask: Offset
     discrete_range_low: int
     discrete_range_high: int
-    human_value_base: Optional[int]
-    human_value_list: Optional[List[str]]
-    human_value_units: Optional[str]
+    human_value_base: Optional[int] = None
+    human_value_list: Optional[List[str]] = None
+    human_value_units: Optional[str] = None
     """possible props: 
         {
             'name': 2330
@@ -594,11 +642,35 @@ def walk_root(type_entries: dict) -> List[TopLevelMemoryZoneContainer]:
     return entries
 
 
-def parse_structlayouts(structlayout_entries: dict) -> List[StructureType]:
+def parse_structlayouts(
+    structlayout_entries: dict, size_entries: dict
+) -> List[StructureType]:
     entries = []
+    section_sizes = size_entries["size_entries"]
+    raw_types = structlayout_entries["raw_unstructured_types"]
     for en, contents in structlayout_entries["data_structure_entries"].items():
         structure_name = StructureTypeUniqueSymbol(en)
         atoms = []
+        if structure_name in raw_types:
+            size = section_sizes[structure_name]
+            logger.info(
+                "Raw type %s of size %s, will not show details because it is extremely verbose.",
+                structure_name,
+                size,
+            )
+            atoms.append(
+                StructureAtom(
+                    "Fake Structure",
+                    structure_name,
+                    OffsetAddr(0),
+                    OffsetAddr(size),
+                    #Offset((1 << size) - 1), # proper but will be extremely long
+                    Offset(0),
+                    0,
+                    0,
+                )
+            )
+            contents = []
         for atom in contents:
             (name, fos, los, bitmask, drl, drh, hvb, hvl, hvu) = (
                 atom.get(a)
@@ -681,18 +753,31 @@ def parse_top_level_meta_structures(memlayout_entries):
 
 def instantiate_memory(memory_layout: MemoryLayout):
     items_from_excluded_ranges = 0
-    with open('define_list.h', 'w', encoding='utf-8', newline='\n') as fh:
+    with open("define_list.h", "w", encoding="utf-8", newline="\n") as fh, open("jupiterx_addresses.py", "w", encoding="utf-8", newline="\n") as fh_p:
+        fh_p.write("class JupiterXAddresses:\n")
         for i in memory_layout.contents:
             for zone in i.contents:
                 for report_item in zone.contents.memory_view:
-                    if any(a <= report_item.offset <= b for (a,b) in EXCLUDE_MEMORY_RANGES):
+                    if any(
+                        a <= report_item.offset <= b for (a, b) in EXCLUDE_MEMORY_RANGES
+                    ):
                         items_from_excluded_ranges += 1
                         if items_from_excluded_ranges % 100_000 == 0:
-                            logger.info("Excluded items: %s", items_from_excluded_ranges)
+                            logger.info(
+                                "Excluded items: %s", items_from_excluded_ranges
+                            )
                         continue
-                    formatted_offset = '0x{0:08x}'.format(report_item.offset)
-                    fh.write(f'#define {report_item.define_name} {formatted_offset} // {report_item.summary}\n')
+                    formatted_offset = "0x{0:08x}".format(report_item.offset)
+                    fh.write(
+                        f"#define {report_item.normalized_define_name} {formatted_offset} // {report_item.summary}\n"
+                        f"#define {report_item.normalized_define_name}_BITMASK {report_item.structure_atom.bitmask}\n"
+                        f"#define {report_item.normalized_define_name}_SIZE {report_item.size}\n"
+                    )
+                    fh_p.write(f"    {report_item.normalized_define_name}_OFFSET: int = {formatted_offset}\n")
+                    fh_p.write(f"    {report_item.normalized_define_name}_BITMASK: int = {report_item.structure_atom.bitmask}\n")
+                    fh_p.write(f"    {report_item.normalized_define_name}_SIZE: int = {report_item.size}\n")
     print(f"Excluded items: {items_from_excluded_ranges}")
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
@@ -704,8 +789,9 @@ if __name__ == "__main__":
     with open("jupiter_structlayout.yaml", "r", encoding="utf-8") as fh:
         structlayout_entries = yaml.load(fh, Loader=yaml.CLoader)
 
+    raw_types = structlayout_entries["raw_unstructured_types"]
     root_entries = walk_root(memlayout_entries)
-    struct_layouts = parse_structlayouts(structlayout_entries)
+    struct_layouts = parse_structlayouts(structlayout_entries, size_entries)
     top_level_ms = parse_top_level_meta_structures(memlayout_entries)
 
     memory_layout = MemoryLayout(root_entries)
