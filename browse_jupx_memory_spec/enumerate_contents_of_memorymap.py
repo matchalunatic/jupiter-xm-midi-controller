@@ -753,8 +753,15 @@ def parse_top_level_meta_structures(memlayout_entries):
 
 def instantiate_memory(memory_layout: MemoryLayout):
     items_from_excluded_ranges = 0
-    with open("define_list.h", "w", encoding="utf-8", newline="\n") as fh, open("jupiterx_addresses.py", "w", encoding="utf-8", newline="\n") as fh_p:
+    with open("define_list.h", "w", encoding="utf-8", newline="\n") as fh, open("jupiterx_addresses.py", "w", encoding="utf-8", newline="\n") as fh_p, open("jupiterx_items.py", "w", encoding="utf-8", newline="\n") as fh_i:
         fh_p.write("class JupiterXAddresses:\n")
+        fh_i.write(textwrap.dedent('''\
+                """Jupiter-X / XM memory addresses in a semi-convenient format for python"""
+                from __future__ import annotations
+                from collections import namedtuple
+                JupXOffsetDetail = namedtuple('JupXOffsetDetail', ('offset', 'size', 'bitmask', 'range'))
+                class JupiterXOffsetDetails:
+                '''))
         for i in memory_layout.contents:
             for zone in i.contents:
                 for report_item in zone.contents.memory_view:
@@ -772,10 +779,16 @@ def instantiate_memory(memory_layout: MemoryLayout):
                         f"#define {report_item.normalized_define_name} {formatted_offset} // {report_item.summary}\n"
                         f"#define {report_item.normalized_define_name}_BITMASK {report_item.structure_atom.bitmask}\n"
                         f"#define {report_item.normalized_define_name}_SIZE {report_item.size}\n"
+                        f"#define {report_item.normalized_define_name}_MIN {report_item.structure_atom.discrete_range_low}\n"
+                        f"#define {report_item.normalized_define_name}_MAX {report_item.structure_atom.discrete_range_high}\n"
                     )
                     fh_p.write(f"    {report_item.normalized_define_name}_OFFSET: int = {formatted_offset}\n")
                     fh_p.write(f"    {report_item.normalized_define_name}_BITMASK: int = {report_item.structure_atom.bitmask}\n")
                     fh_p.write(f"    {report_item.normalized_define_name}_SIZE: int = {report_item.size}\n")
+                    fh_p.write(f"    {report_item.normalized_define_name}_MIN: int = {report_item.structure_atom.discrete_range_low}\n")
+                    fh_p.write(f"    {report_item.normalized_define_name}_MAX: int = {report_item.structure_atom.discrete_range_high}\n")
+
+                    fh_i.write(f"    {report_item.normalized_define_name}: JupXOffsetDetail = JupXOffsetDetail(offset={formatted_offset}, size={report_item.size}, bitmask={report_item.structure_atom.bitmask}, range=({report_item.structure_atom.discrete_range_low}, {report_item.structure_atom.discrete_range_high}))\n")
     print(f"Excluded items: {items_from_excluded_ranges}")
 
 
