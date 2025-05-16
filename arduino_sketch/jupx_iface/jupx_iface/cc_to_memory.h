@@ -1,0 +1,1 @@
+#define UINT_PARM_CC71 (0x0210004f, 0, 1023)

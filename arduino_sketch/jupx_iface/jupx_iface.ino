@@ -1,66 +1,89 @@
 #include <Arduino.h>
 #include <Adafruit_TinyUSB.h>
 #include <MIDI.h>
-#include "jupx_headers.h"
+#include "jupx_iface/cc_to_memory.h"
+#include "jupx_iface/jupx_headers.h"
+#include "jupx_iface/macros.h"
 
 #define DEBUG_PORT Serial
-#define CONTROLLED_BYTE_PARAMETER(offset, cc_num, range_min, range_max) \
-  uint8_t parm_##cc_num##_value = 0; \
-  static const ubyte_jupx_parameter parm_##cc_num = { (offset), (cc_num), &(parm_##cc_num##_value), (range_min), (range_max) }
 #define SYSEX_TARGET midiDIN
-#define CONTROLLED_UINT_PARAMETER(cc_num, val, range_min, range_max) \
-  uint32_t parm_##cc_num##_value = 0; \
-  static const uint_jupx_parameter parm_##cc_num = { (val), (cc_num), &(parm_##cc_num##_value), (range_min), (range_max) }
-#define UINT32_TO_BYTES(val) (val & 0xff000000) >> 24, (val & 0x00ff0000) >> 16, (val & 0x0000ff00) >> 8, (val & 0x000000ff)
-#define SHORT_TO_BYTES(val) (val & 0xff00) >> 8, (val & 0xff)
-#define NUMBER_TO_8NIBS(val) (val >> 28) & 0xf, (val >> 24) & 0xf, (val >> 20) & 0xf, (val >> 16) & 0xf, (val >> 12) & 0xf, (val >> 8) & 0xf, (val >> 4) & 0xf, (val)&0xf
-#define NUMBER_TO_6NIBS(val) (val >> 20) & 0xf, (val >> 16) & 0xf, (val >> 12) & 0xf, (val >> 8) & 0xf, (val >> 4) & 0xf, (val)&0xf
-#define NUMBER_TO_4NIBS(val) (val >> 12) & 0xf, (val >> 8) & 0xf, (val >> 4) & 0xf, (val)&0xf
-#define NUMBER_TO_3NIBS(val) (val >> 8) & 0xf, (val >> 4) & 0xf, (val)&0xf
-#define NUMBER_TO_2NIBS(val) (val >> 4) & 0xf, (val)&0xf
-#define NIB(val,i) (val >> ((i - 1) * 4)) & 0xf
-#define BYTEPOS(val,i) ((val >> (i - 1) * 8)  & 0xff)
 
 
 #define VENDOR_ID (0x41)
 #define JUPITER_XM
+#define DEVICE_ID 17
 
-
-
+ccHandlersView* ccHandler;
 // Config
 
 char mfgstr[32] = "Matcha";
 char prodstr[32] = "JupX Forwarder";
-char debugMessage[100] = "uninitialized";
-// Parameters
-#define DEVICE_ID 17
-
-#define CC71_ENABLED
-CONTROLLED_UINT_PARAMETER(71, 0x0210004f, 0, 1023);
-
-
 
 // subsequent parameters
 
 #ifdef JUPITER_XM
-#define MODEL_ID 0, 0, 0, 0x65
+#define MODEL_ID_SHORT 0x65
 #else
-#define MODEL_ID 0, 0, 0, 0x52
+#define MODEL_ID_SHORT 0x52
 #endif
+
+#define MODEL_ID 0, 0, 0, (MODEL_ID_SHORT)
+
+// debug message buffer
+char debugMessage[100] = "uninitialized";
+
+
+readValue * readValues;
+readValue * readValuesStartingPos;
 // USB MIDI object
 Adafruit_USBD_MIDI usb_midi;
 
-// Create instance of Arduino MIDI library,
-// and attach usb_midi as the transport.
-// MIDI_CREATE_INSTANCE(Adafruit_USBD_MIDI, usb_midi, midiUSB);
 MIDI_CREATE_INSTANCE(Adafruit_USBD_MIDI, usb_midi, midiUSB);
-
-// Create instance of Arduino MIDI library,
-// and attach HardwareSerial Serial1 (TrinketM0 pins 3 & 4 or TX/RX on a QT Py, this is automatic)
 MIDI_CREATE_INSTANCE(HardwareSerial, Serial1, midiDIN);
+
+void cutoffHandler(int8_t changedAmount) {
+  INT_PARAM_HANDLER("tvfCutOff", 0x0210004f, 0, 1023, 1);
+
+  snprintf(debugMessage, 100, "cutoff changed by %d\n", changedAmount);
+}
+
+void initializeCcHandler() {
+  ccHandler = malloc(sizeof(ccHandlersView));
+  for (int i = 0; i < 128; i++) {
+    ccHandler->array[i] = NULL;
+  }
+  // now we can set a handler for each CC number
+  SET_HANDLER(71, cutoffHandler);
+}
+
+void initializeDT1Reader() {
+  readValues = malloc(sizeof(readValue) * 128);
+  readValuesStartingPos = readValues;
+  readValue * rv = readValues;
+  for (int i = 0; i < 128; i++) {
+    rv->offset = 0;
+    rv->value = 0;
+    rv++;
+  }
+}
+
+void setReadValue(offset, value) {
+  readValue * rv = readValuesStartingPos;
+  for (int i = 0; i < 128; i++) {
+    if (rv->offset == 0 || rv->offset == offset) {
+      rv->offset = offset;
+      rv-> value = value;
+      break;
+    }
+    rv++;
+  }
+}
+
 
 void setup() {
   DEBUG_PORT.begin(115200);
+  initializeCcHandler();
+  initializeDT1Reader();
   pinMode(LED_BUILTIN, OUTPUT);
   USBDevice.setManufacturerDescriptor(mfgstr);
   USBDevice.setProductDescriptor(prodstr);
@@ -69,24 +92,54 @@ void setup() {
 
   midiUSB.turnThruOff();
   midiDIN.turnThruOff();
+}
 
+void decodeSysExDT1(byte* array, unsigned size) {
 
-  
-
+  if (array[6] != 0x12) {
+    snprintf(debugMessage, "Command is not DT1 = 0x12: %x", array[6], 40);
+  }
+  if (size != 16) {
+    snprintf(debugMessage, "Wrong message size %d != 16\n", size, 40);
+  }
+  snprintf(debugMessage, "Reading DT1 for offset %x %x %x %x\n", array[7], array[8], array[9], array[10]);
+  uint32_t offset = NIBS_TO_UINT32(array[7], array[8], array[9], array[10]);
+  uint32_t value = NIBS_TO_UINT32(array[11], array[12], array[13], array[14])
+  uint8_t checksum = computeRolandChecksumForInt(offset, &value);
+  if (checksum != array[15]) {
+    snprintf("Wrong checksum for offset %x and value %x: %d (theoretical)!= %d (received)\n", offset, value, checksum, checksum, array[15], 100);
+  }
+  setReadValue(offset, value);
 }
 
 void handleSysExIncoming(byte* array, unsigned size) {
   // snprintf(debugMessage, 100, "sysex %x", array);
   // debug_sysex(array, size);
   // return;
+  if (array[0] != VENDOR_ID) {
+    snprintf(debugMessage, "Wrong VENDOR_ID %x", array[0], 40);
+    return;
+  }
+  if (array[1] != DEVICE_ID) {
+    snprintf(debugMessage, "Wrong DEVICE_ID %x", array[1], 40);
+    return;
+  }
+  if (array[2] != 0 || array[3] != 0 || array[4] != 0 || array[5] != MODEL_ID_SHORT) {
+    snprintf(debugMessage, "Wrong MODEL_ID %x % %x %x", array[2], array[3], array[4], array[5], 40);
+    return;
+  }
+
   digitalWrite(LED_BUILTIN, HIGH);
   delay(20);
   digitalWrite(LED_BUILTIN, LOW);
-
-  DEBUG_PORT.printf("Got sysex with size %d\n", size);
-  DEBUG_PORT.println("Data:");
-  for (int i = 0; i < size; i++)
-    DEBUG_PORT.printf("Data[%d]: %d\n", i, array[i]);
+  switch (array[6]) {
+    case 0x12:
+      decodeSysExDT1(array, size);
+      break;
+    default:
+      break;
+  }
+  
 }
 
 
@@ -112,7 +165,7 @@ uint8_t computeRolandChecksumForInt(const uint32_t offset, const uint32_t* value
   uint8_t r = 128 - ((BYTEPOS(offset, 4) + BYTEPOS(offset, 3) + BYTEPOS(offset, 2) + BYTEPOS(offset, 1) + BYTEPOS(*value, 4) + BYTEPOS(*value, 3) + BYTEPOS(*value, 2) + BYTEPOS(*value, 1)) % 128);
   return r == 128 ? 0 : r;
 }
-/*
+
 void emitRolandDT1_byte(const uint32_t offset, const uint8_t* value) {
   // length: 13 ->  1 (Vendor) + 1 (Device ID) + 4 (Model ID) + 1 (command) + 4 (address) + 1 (value) + 1 (checksum)
   // static const byte sysex[13]  = { VENDOR_ID, (DEVICE_ID - 1), MODEL_ID, 0x11, UINT32_TO_BYTES(offset), value, computeRolandChecksumForByte(offset, value) };
@@ -125,14 +178,13 @@ void emitRolandDT1_byte(const uint32_t offset, const uint8_t* value) {
   memset(&sysex[12], computeRolandChecksumForByte(offset, value), 1);4
   SYSEX_TARGET.sendSysEx(13, sysex);
   DEBUG_PORT.println("Sent sysex DT1/byte");
-  
 }
 
 void emitRolandDT1_short(const uint32_t offset, const uint16_t* value) {
   // length: 14 ->  1 (Vendor) + 1 (Device ID) + 4 (Model ID) + 1 (command) + 4 (address) + 2 (value) + 1 (checksum)
   // static byte sysex[14]  = { VENDOR_ID, (DEVICE_ID - 1), MODEL_ID, 0x11, UINT32_TO_BYTES(offset), NUMBER_TO_2NIBS(*value), computeRolandChecksumForByte(offset, value) };
   static byte sysex[14]  = { VENDOR_ID, (DEVICE_ID - 1), MODEL_ID, 0x12, 0, 0, 0, 0, 0, 0, 0 };
-0  memset(&sysex[7], BYTEPOS(offset, 4), 1);
+  memset(&sysex[7], BYTEPOS(offset, 4), 1);
   memset(&sysex[8], BYTEPOS(offset, 3), 1);
   memset(&sysex[9], BYTEPOS(offset, 2), 1);
   memset(&sysex[10], BYTEPOS(offset, 1), 1);
@@ -143,7 +195,7 @@ void emitRolandDT1_short(const uint32_t offset, const uint16_t* value) {
   DEBUG_PORT.println("Sent sysex DT1/short");
   
 }
-*/
+
 void emitRolandDT1_int(const uint32_t offset, const uint32_t* value) {
   // length: 16 ->  1 (Vendor) + 1 (Device ID) + 4 (Model ID) + 1 (command) + 4 (address) + 4 (value) + 1 (checksum)
   // static const byte sysex[16]  = { VENDOR_ID, (DEVICE_ID - 1), MODEL_ID, 0x11, UINT32_TO_BYTES(offset), NUMBER_TO_4NIBS(*value), computeRolandChecksumForByte(offset, value) };
@@ -188,75 +240,46 @@ void emitRolandRQ1_int(const uint32_t offset, uint32_t* result, byte size) {
   DEBUG_PORT.println("Sent sysex RQ1/int");
 }
 
+
+
+
+
+// size is always 4
+// careful: this is disruptive of normal operation and must
+// only be used at initialization
+uint32_t obtainMemoryValue_int(const uint32_t offset) {
+  uint32_t res;
+
+}
+
+
 void handleCC(byte channel, byte number, byte value) {
-  // DEBUG_PORT.printf("CC %d, value %d\n", number, value);
-  //digitalWrite(LED_BUILTIN, HIGH);
-  // delay(20);
-  //digitalWrite(LED_BUILTIN, LOW);
-  int8_t increment = value >= 64 ? 1 : -1;
+  if (ccHandler->array[number] == NULL) return;
 
-  switch (number) {
-    case 71:
-      *(parm_71.current_value) += increment;
-      if (*(parm_71.current_value) < parm_71.range_min) {
-        *(parm_71.current_value) = parm_71.range_min;
-      } else if (*(parm_71.current_value) > parm_71.range_max) {
-        *(parm_71.current_value) = parm_71.range_max;
-      }
-      emitRolandDT1_int(parm_71.offset, parm_71.current_value);
-      snprintf(debugMessage, 100, "CC %d with value %d, reaching new value %d\n", number, value, *(parm_71.current_value));
-      break;
-    default:
-    snprintf(debugMessage, 100, "UNKNOWN CC %d with value %d\n", number, value);
-      break;
-  }
-}
-
-void handleCC2(byte channel, byte number, byte value) {
-  // DEBUG_PORT.printf("CC %d, value %d\n", number, value);
-  //digitalWrite(LED_BUILTIN, HIGH);
-  // delay(20);
-  //digitalWrite(LED_BUILTIN, LOW);
   int8_t increment = -64 + value;
-
-  switch (number) {
-    case 71:
-      *(parm_71.current_value) += increment;
-      if (*(parm_71.current_value) < parm_71.range_min) {
-        *(parm_71.current_value) = parm_71.range_min;
-      } else if (*(parm_71.current_value) > parm_71.range_max) {
-        *(parm_71.current_value) = parm_71.range_max;
-      }
-      emitRolandDT1_int(parm_71.offset, parm_71.current_value);
-      snprintf(debugMessage, 100, "CC2 %d with value %d, reaching new value %d\n", number, value, *(parm_71.current_value));
-      break;
-    default:
-    snprintf(debugMessage, 100, "UNKNOWN CC %d with value %d\n", number, value);
-      break;
+  ccHandler->array[number](increment);
+  
+  snprintf(debugMessage, 20, "CC[%d][%d]\n", number, value);
   }
 }
 
 
+// scan parameter presets to know which MIDI CC to respond to
+void scanParameterPresets() {
+  
+}
 
 
 long milestone = 2000;
-
-
 bool midiInitialPollDone = false;
 
 
 void initialMidiPolling() {
   DEBUG_PORT.println("Requesting for parm 71");
   midiUSB.setHandleControlChange(handleCC);
-  midiDIN.setHandleControlChange(handleCC2);
+  // midiDIN.setHandleControlChange(handleCC);
   midiDIN.setHandleSystemExclusive(handleSysExIncoming);
   emitRolandRQ1_int(parm_71.offset, parm_71.current_value, 4);
-  midiDIN.sendNoteOn(64, 100, 1);
-  delay(1000);
-  midiDIN.sendNoteOn(63, 100, 1);
-  midiDIN.sendNoteOff(64, 100, 1);
-  delay(1000);
-  midiDIN.sendNoteOff(63, 100, 1);
 }
 
 unsigned long nextDebug = 0;
