@@ -15,6 +15,9 @@
 #define NO_ERR 0
 #define ERR_VALUE_NOT_FOUND 1
 
+#define SYSEX_DEVICE_ID ((DEVICE_ID) - 1)
+
+
 ccHandlersView* ccHandler;
 // Config
 
@@ -33,6 +36,7 @@ char prodstr[32] = "JupX Forwarder";
 
 // debug message buffer
 char debugMessage[100] = "uninitialized";
+char oldDebugMessage[100] = "uninitialized";
 uint8_t mcErrno;
 
 readValue* readValues;
@@ -43,10 +47,58 @@ Adafruit_USBD_MIDI usb_midi;
 MIDI_CREATE_INSTANCE(Adafruit_USBD_MIDI, usb_midi, midiUSB);
 MIDI_CREATE_INSTANCE(HardwareSerial, Serial1, midiDIN);
 
-void cutoffHandler(int8_t changedAmount) {
+void doDebug(char * message) {
+  DEBUG_PORT.println(message);
+}
+
+void cutoffHandler(uint8_t changedAmount) {
   INT_PARAM_HANDLER(tvfCutOff, 0x0210004f, 0, 1023, 1);
+  INT_PARAM_HANDLER(tvfReso,   0x02100053, 0, 1023, -1);
 
   snprintf(debugMessage, 100, "cutoff changed by %d\n", changedAmount);
+}
+
+uint16_t nrpnAddr;
+uint16_t nrpnVal;
+
+void nrpnMSBAddrHandler(uint8_t value) {
+  nrpnAddr = ((value & 0x7f) << 8) & 0xff00;
+  // DEBUG_PORT.printf("MSB addr: %02x ", value);
+}
+
+void nrpnLSBAddrHandler(uint8_t value) {
+  nrpnAddr += (value & 0x7f);
+  // DEBUG_PORT.printf("LSB addr: %02x ", value);
+}
+
+void nrpnDataMSBHandler(uint8_t value) {
+  nrpnVal = ((value & 0x7f) << 7) & 0b11111110000000;
+  // DEBUG_PORT.printf("MSB val: %02x ", value);
+}
+
+void nrpnDataLSBHandler(uint8_t value) {
+  nrpnVal += (value & 0x7f);
+  // DEBUG_PORT.printf("LSB val: %02x \n", value);
+  handleNRPNEntry();
+}
+
+
+void handleNRPNEntry() {
+  uint32_t valueToSend;
+  switch (nrpnAddr) {
+    case 0x0100:
+      valueToSend = nrpnVal / 16; // it goes from 0 to 1023
+      emitRolandDT1_int(0x0210004f, &valueToSend);
+      snprintf(debugMessage, 100, "we handled NRPN %04x and sent value %d (based on NRPN val %04x)\n", nrpnAddr, valueToSend, nrpnVal);
+      break;
+    case 0x0200:
+      valueToSend = nrpnVal / 16; // it goes from 0 to 1023
+      emitRolandDT1_int(0x02100053, &valueToSend);
+      snprintf(debugMessage, 100, "we handled NRPN %04x and sent value %d (based on NRPN val %04x)\n", nrpnAddr, valueToSend, nrpnVal);
+      break;
+    default:
+      snprintf(debugMessage, 100, "Unknown NRPN %04x for value %04x\n", nrpnAddr, nrpnVal);
+  }
 }
 
 void initializeCcHandler() {
@@ -56,6 +108,10 @@ void initializeCcHandler() {
   }
   // now we can set a handler for each CC number
   SET_HANDLER(71, cutoffHandler);
+
+
+  // finally, handle the RPN/NRPN system
+
 }
 
 void initializeDT1Reader() {
@@ -109,18 +165,21 @@ void setup() {
 }
 
 void decodeSysExDT1(byte* array, unsigned size) {
-
-  if (array[6] != 0x12) {
+  if (array[0] != 0xf0 || array[17] != 0xf7) {
+    doDebug("Wrong sysex header/tail");
+    snprintf(debugMessage, 40, "Wrong sysex header/tail 0x%x/0x%x", array[0], array[17]);
+  }
+  if (array[7] != 0x12) {
     snprintf(debugMessage, 40, "Command is not DT1 = 0x12: %x", array[6]);
   }
   if (size != 16) {
     snprintf(debugMessage, 40, "Wrong message size %d != 16\n", size);
   }
-  snprintf(debugMessage, 100, "Reading DT1 for offset %x %x %x %x\n", array[7], array[8], array[9], array[10]);
-  uint32_t offset = NIBS_TO_UINT32(array[7], array[8], array[9], array[10]);
-  uint32_t value = NIBS_TO_UINT32(array[11], array[12], array[13], array[14]);
+  snprintf(debugMessage, 100, "Reading DT1 for offset %x %x %x %x\n", array[8], array[9], array[10], array[11]);
+  uint32_t offset = NIBS_TO_UINT32(array[8], array[9], array[10], array[11]);
+  uint32_t value = NIBS_TO_UINT32(array[12], array[13], array[14], array[15]);
   uint8_t checksum = computeRolandChecksumForInt(offset, &value);
-  if (checksum != array[15]) {
+  if (checksum != array[16]) {
     snprintf(debugMessage, 100, "Wrong checksum for offset %x and value %x: %d (theoretical)!= %d (received)\n", offset, value, checksum, checksum, array[15]);
   }
   setReadValue(offset, value);
@@ -128,28 +187,28 @@ void decodeSysExDT1(byte* array, unsigned size) {
 
 void handleSysExIncoming(byte* array, unsigned size) {
   // snprintf(debugMessage, 100, "sysex %x", array);
-  // debug_sysex(array, size);
+  debug_sysex(array, "handle-sysex", size);
   // return;
-  array ++;
-  if (array[0] != VENDOR_ID) {
-    snprintf(debugMessage, 40, "Wrong VENDOR_ID %x", array[0]);
+  if (array[1] != VENDOR_ID) {
+    snprintf(debugMessage, 40, "Wrong VENDOR_ID 0x%x", array[1]);
     return;
   }
-  if (array[1] != DEVICE_ID) {
-    snprintf(debugMessage, 40, "Wrong DEVICE_ID %x", array[1]);
+  if (array[2] != SYSEX_DEVICE_ID) {
+    snprintf(debugMessage, 40, "Wrong DEVICE_ID 0x%x != 0x%x", array[2], SYSEX_DEVICE_ID);
+    doDebug("handle-sysexincoming - wrong device_id");
     return;
   }
-  if (array[2] != 0 || array[3] != 0 || array[4] != 0 || array[5] != MODEL_ID_SHORT) {
-    snprintf(debugMessage, 40, "Wrong MODEL_ID %x % %x %x", array[2], array[3], array[4], array[5]);
+  if (array[3] != 0 || array[4] != 0 || array[5] != 0 || array[6] != MODEL_ID_SHORT) {
+    snprintf(debugMessage, 40, "Wrong MODEL_ID 0x%x 0x%x 0x%x 0x%x", array[3], array[4], array[5], array[6]);
     return;
   }
 
   digitalWrite(LED_BUILTIN, HIGH);
   delay(20);
   digitalWrite(LED_BUILTIN, LOW);
-  switch (array[6]) {
+  switch (array[7]) {
     case 0x12:
-      decodeSysExDT1(array, size - 2);
+      decodeSysExDT1(array, size);
       break;
     default:
       break;
@@ -180,6 +239,15 @@ uint8_t computeRolandChecksumForInt(const uint32_t offset, const uint32_t* value
   return r == 128 ? 0 : r;
 }
 
+void setRolandChecksum(byte * sysex, uint8_t startingPos, uint8_t payloadLength) {
+  uint8_t ck = 0;
+  for (uint8_t i = startingPos; i < startingPos + payloadLength; i++) {
+    
+    ck = (ck + sysex[i]) & 0x7f;
+  }
+  sysex[startingPos + payloadLength] = (0x80 - ck) & 0x7f;
+}
+
 void emitRolandDT1_byte(const uint32_t offset, const uint8_t* value) {
   // length: 13 ->  1 (Vendor) + 1 (Device ID) + 4 (Model ID) + 1 (command) + 4 (address) + 1 (value) + 1 (checksum)
   // static const byte sysex[13]  = { VENDOR_ID, (DEVICE_ID - 1), MODEL_ID, 0x11, UINT32_TO_BYTES(offset), value, computeRolandChecksumForByte(offset, value) };
@@ -189,7 +257,8 @@ void emitRolandDT1_byte(const uint32_t offset, const uint8_t* value) {
   memset(&sysex[9], BYTEPOS(offset, 2), 1);
   memset(&sysex[10], BYTEPOS(offset, 1), 1);
   memset(&sysex[11], NIB(*value, 1), 1);
-  memset(&sysex[12], computeRolandChecksumForByte(offset, *value), 1);
+  // memset(&sysex[12], computeRolandChecksumForByte(offset, *value), 1);
+  setRolandChecksum(sysex, 7, 5);
   SYSEX_TARGET.sendSysEx(13, sysex);
   DEBUG_PORT.println("Sent sysex DT1/byte");
 }
@@ -204,7 +273,8 @@ void emitRolandDT1_short(const uint32_t offset, const uint16_t* value) {
   memset(&sysex[10], BYTEPOS(offset, 1), 1);
   memset(&sysex[11], NIB(*value, 2), 1);
   memset(&sysex[12], NIB(*value, 1), 1);
-  memset(&sysex[13], computeRolandChecksumForShort(offset, value), 1);
+  // memset(&sysex[13], computeRolandChecksumForShort(offset, value), 1);
+  setRolandChecksum(sysex, 7, 6);
   SYSEX_TARGET.sendSysEx(14, sysex);
   DEBUG_PORT.println("Sent sysex DT1/short");
 }
@@ -221,22 +291,21 @@ void emitRolandDT1_int(const uint32_t offset, const uint32_t* value) {
   memset(&sysex[12], NIB(*value, 3), 1);
   memset(&sysex[13], NIB(*value, 2), 1);
   memset(&sysex[14], NIB(*value, 1), 1);
-  memset(&sysex[15], computeRolandChecksumForInt(offset, value), 1);
-  debug_sysex(sysex, 16);
-
+  // memset(&sysex[15], computeRolandChecksumForInt(offset, value), 1);
+  setRolandChecksum(sysex, 7, 8);
+  // debug_sysex(sysex, "emit-DT1 (int)", 16);  
   SYSEX_TARGET.sendSysEx(16, sysex);
-  DEBUG_PORT.println("Sent sysex DT1/int");
 }
 
-void debug_sysex(byte* sysex, uint8_t len) {
-  DEBUG_PORT.println("Sysex message debug");
+void debug_sysex(byte* sysex, char * source, uint8_t len) {
+  DEBUG_PORT.printf("%s - Sysex message debug:", source);
   for (uint8_t i = 0; i < len; i++) {
-    DEBUG_PORT.printf("Byte %d: 0x%02x\n", i, sysex[i]);
+    DEBUG_PORT.printf(" %02x", sysex[i]);
   }
+  DEBUG_PORT.println(".");
 }
 
 void emitRolandRQ1_int(const uint32_t offset, byte size) {
-  DEBUG_PORT.printf("RQ1 on 0x%08x of size %d\n", offset, size);
   static byte sysex[16] = { VENDOR_ID, (DEVICE_ID - 1), MODEL_ID, 0x11, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
   memset(&sysex[7], BYTEPOS(offset, 4), 1);
   memset(&sysex[8], BYTEPOS(offset, 3), 1);
@@ -247,23 +316,35 @@ void emitRolandRQ1_int(const uint32_t offset, byte size) {
   memset(&sysex[13], NIB(size, 2), 1);
   memset(&sysex[14], NIB(size, 1), 1);
   memset(&sysex[15], computeRolandChecksumForByte(offset, size), 1);
-  debug_sysex(sysex, 16);
+  debug_sysex(sysex, "emit-RQ1", 16);
   SYSEX_TARGET.sendSysEx(16, sysex);
   midiUSB.sendSysEx(16, sysex);
   DEBUG_PORT.println("Sent sysex RQ1/int");
 }
 
 
-
-
-
-
-
 void handleCC(byte channel, byte number, byte value) {
+  switch (number) {
+    case 0x63:
+      nrpnMSBAddrHandler(value);
+      break;
+    case 0x62:
+      nrpnLSBAddrHandler(value);
+      break;
+    case 0x06:
+      nrpnDataMSBHandler(value);
+      break;
+    case 0x26:
+      nrpnDataLSBHandler(value);
+      break;
+    default:
+      break;
+  }
+  // non-NRPN sorcery things are all relative
   if (ccHandler->array.handlers[number] == NULL) return;
-  int8_t increment = -64 + value;
+  uint8_t increment = -64 + value;
   ccHandler->array.handlers[number](increment);
-  snprintf(debugMessage, 20, "CC[%d][%d]\n", number, value);
+  // snprintf(debugMessage, 20, "CC[%d][%d]\n", number, value);
 }
 
 
@@ -281,9 +362,10 @@ void initialMidiPolling() {
   midiUSB.setHandleControlChange(handleCC);
   // midiDIN.setHandleControlChange(handleCC);
   midiDIN.setHandleSystemExclusive(handleSysExIncoming);
-
   LOAD_INT_PARAM_VALUE(0x0210004f); // tvfCutOff
+  LOAD_INT_PARAM_VALUE(0x02100053); // tvfResonance
 }
+
 
 unsigned long nextDebug = 0;
 void loop() {
@@ -294,8 +376,10 @@ void loop() {
   }
   // DEBUG_PORT.println("Well...");
   if (nextDebug < millis()) {
-
-    DEBUG_PORT.printf("Debug message %lu:\t%s\n", nextDebug, debugMessage);
+    if (strcmp(oldDebugMessage, debugMessage) != 0) {
+      DEBUG_PORT.printf("Debug message %lu:\t%s\n", nextDebug, debugMessage);
+      strcpy(oldDebugMessage, debugMessage);
+    }
     nextDebug = millis() + 2000;
   }
   midiUSB.read();

@@ -31,7 +31,7 @@ typedef struct {
 } jupx_parameters;
 
 
-typedef void (*ccHandlerType)(int8_t);
+typedef void (*ccHandlerType)(uint8_t);
 
 typedef struct {
   ccHandlerType handlers[128];
