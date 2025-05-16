@@ -4,6 +4,7 @@
 #include "jupx_iface/cc_to_memory.h"
 #include "jupx_iface/jupx_headers.h"
 #include "jupx_iface/macros.h"
+#include "jupx_iface/memory_addresses.h"
 
 #define DEBUG_PORT Serial
 #define SYSEX_TARGET midiDIN
@@ -52,8 +53,12 @@ void doDebug(char * message) {
 }
 
 void cutoffHandler(uint8_t changedAmount) {
-  INT_PARAM_HANDLER(tvfCutOff, 0x0210004f, 0, 1023, 1);
-  INT_PARAM_HANDLER(tvfReso,   0x02100053, 0, 1023, -1);
+  INT_PARAM_HANDLER(tvfCutOffJpx, TEMPORARY_TONE_JUPITER_X_0_MDLJPX_FILTER_CUTOFF_FREQ, 0, 1023, 1);
+  INT_PARAM_HANDLER(tvfCutOffAnl, TEMPORARY_TONE_ANALOG_SYNTH_MODEL_0_MDLSYN0_FILTER_FREQ, 0, 1023, 1);
+  INT_PARAM_HANDLER(tvfCutOffZcr, TEMPORARY_TONE_ZCORE_0_TONE_PARTIAL_TVF_CUTOFF_FREQUENCY, 0, 1023, 1);
+  INT_PARAM_HANDLER(tvfResoJpx,   TEMPORARY_TONE_JUPITER_X_0_MDLJPX_FILTER_RESONANCE, 0, 1023, -1);
+  INT_PARAM_HANDLER(tvfResoAnl,   TEMPORARY_TONE_ANALOG_SYNTH_MODEL_0_MDLSYN0_FILTER_RESO, 0, 1023, -1);
+  INT_PARAM_HANDLER(tvfResoZcr,   TEMPORARY_TONE_ZCORE_0_TONE_PARTIAL_TVF_RESONANCE, 0, 1023, -1);
 
   snprintf(debugMessage, 100, "cutoff changed by %d\n", changedAmount);
 }
@@ -88,12 +93,16 @@ void handleNRPNEntry() {
   switch (nrpnAddr) {
     case 0x0100:
       valueToSend = nrpnVal / 16; // it goes from 0 to 1023
-      emitRolandDT1_int(0x0210004f, &valueToSend);
+      emitRolandDT1_int(TEMPORARY_TONE_JUPITER_X_0_MDLJPX_FILTER_CUTOFF_FREQ, &valueToSend);
+      emitRolandDT1_int(TEMPORARY_TONE_ANALOG_SYNTH_MODEL_0_MDLSYN0_FILTER_FREQ, &valueToSend);
+      emitRolandDT1_int(TEMPORARY_TONE_ZCORE_0_TONE_PARTIAL_TVF_CUTOFF_FREQUENCY, &valueToSend);
       snprintf(debugMessage, 100, "we handled NRPN %04x and sent value %d (based on NRPN val %04x)\n", nrpnAddr, valueToSend, nrpnVal);
       break;
     case 0x0200:
       valueToSend = nrpnVal / 16; // it goes from 0 to 1023
-      emitRolandDT1_int(0x02100053, &valueToSend);
+      emitRolandDT1_int(TEMPORARY_TONE_JUPITER_X_0_MDLJPX_FILTER_RESONANCE, &valueToSend);
+      emitRolandDT1_int(TEMPORARY_TONE_ANALOG_SYNTH_MODEL_0_MDLSYN0_FILTER_RESO, &valueToSend);
+      emitRolandDT1_int(TEMPORARY_TONE_ZCORE_0_TONE_PARTIAL_TVF_RESONANCE, &valueToSend);
       snprintf(debugMessage, 100, "we handled NRPN %04x and sent value %d (based on NRPN val %04x)\n", nrpnAddr, valueToSend, nrpnVal);
       break;
     default:
@@ -187,19 +196,20 @@ void decodeSysExDT1(byte* array, unsigned size) {
 
 void handleSysExIncoming(byte* array, unsigned size) {
   // snprintf(debugMessage, 100, "sysex %x", array);
-  debug_sysex(array, "handle-sysex", size);
+  // debug_sysex(array, "handle-sysex", size);
   // return;
   if (array[1] != VENDOR_ID) {
-    snprintf(debugMessage, 40, "Wrong VENDOR_ID 0x%x", array[1]);
     return;
+    // snprintf(debugMessage, 40, "Wrong VENDOR_ID 0x%x", array[1]);
+    
   }
   if (array[2] != SYSEX_DEVICE_ID) {
-    snprintf(debugMessage, 40, "Wrong DEVICE_ID 0x%x != 0x%x", array[2], SYSEX_DEVICE_ID);
-    doDebug("handle-sysexincoming - wrong device_id");
+    //snprintf(debugMessage, 40, "Wrong DEVICE_ID 0x%x != 0x%x", array[2], SYSEX_DEVICE_ID);
+    //doDebug("handle-sysexincoming - wrong device_id");
     return;
   }
   if (array[3] != 0 || array[4] != 0 || array[5] != 0 || array[6] != MODEL_ID_SHORT) {
-    snprintf(debugMessage, 40, "Wrong MODEL_ID 0x%x 0x%x 0x%x 0x%x", array[3], array[4], array[5], array[6]);
+    // snprintf(debugMessage, 40, "Wrong MODEL_ID 0x%x 0x%x 0x%x 0x%x", array[3], array[4], array[5], array[6]);
     return;
   }
 
@@ -362,8 +372,13 @@ void initialMidiPolling() {
   midiUSB.setHandleControlChange(handleCC);
   // midiDIN.setHandleControlChange(handleCC);
   midiDIN.setHandleSystemExclusive(handleSysExIncoming);
-  LOAD_INT_PARAM_VALUE(0x0210004f); // tvfCutOff
-  LOAD_INT_PARAM_VALUE(0x02100053); // tvfResonance
+  LOAD_INT_PARAM_VALUE(TEMPORARY_TONE_JUPITER_X_0_MDLJPX_FILTER_CUTOFF_FREQ); // tvfCutOff
+  LOAD_INT_PARAM_VALUE(TEMPORARY_TONE_ANALOG_SYNTH_MODEL_0_MDLSYN0_FILTER_FREQ); // tvfCutOff
+  LOAD_INT_PARAM_VALUE(TEMPORARY_TONE_ZCORE_0_TONE_PARTIAL_TVF_CUTOFF_FREQUENCY); // tvfCutOff
+  
+  LOAD_INT_PARAM_VALUE(TEMPORARY_TONE_JUPITER_X_0_MDLJPX_FILTER_RESONANCE); // tvfResonance
+  LOAD_INT_PARAM_VALUE(TEMPORARY_TONE_ANALOG_SYNTH_MODEL_0_MDLSYN0_FILTER_RESO); // tvfResonance
+  LOAD_INT_PARAM_VALUE(TEMPORARY_TONE_ZCORE_0_TONE_PARTIAL_TVF_RESONANCE); // tvfResonance
 }
 
 
