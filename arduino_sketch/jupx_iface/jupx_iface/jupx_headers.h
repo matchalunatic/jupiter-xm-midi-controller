@@ -179,3 +179,34 @@ typedef struct {
   uint32_t offset;
   uint32_t value;
 } readValue;
+
+
+
+typedef struct {
+  uint32_t nrpnAddress;
+  uint32_t nrpnValue;
+  uint8_t mcErrno;
+} midiReaderState;
+
+typedef struct {
+  uint32_t* intSlots;
+  uint16_t* shortSlots;
+  uint8_t*  byteSlots;
+} memoryValuesState;
+
+typedef struct {
+  uint8_t shiftOn : 1;
+  uint8_t superOn : 1;
+  uint8_t mode1On : 1;
+  uint8_t mode2On : 1;
+  uint8_t mode3On : 1;
+  uint8_t mode4On : 1;
+  uint8_t mode5On : 1;
+  uint8_t mode6On : 1;
+  uint16_t cooldown;
+} realtimeControllerState;
+
+typedef struct {
+  uint8_t slot;
+  uint32_t offset;
+} slotToOffsetEntry;
